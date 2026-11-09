@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adb-wifi-connect"
+version = "1.0.0"
+description = "Pair and connect to Android devices via WiFi ADB using QR code or manual pairing"
+requires-python = ">=3.7"
+dependencies = []
+
+[project.optional-dependencies]
+qr = ["qrcode"]
+mdns = ["zeroconf"]
+sixel = ["sixel", "qrcode[pil]"]
+all = ["qrcode", "zeroconf", "sixel", "qrcode[pil]"]
+
+[project.scripts]
+adb-connect = "adb_wifi_connect.cli:run"
+awc = "adb_wifi_connect.cli:run"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

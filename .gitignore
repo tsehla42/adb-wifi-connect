@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Local config — may contain real network details, never commit
+.env
+
+# Docs — ignore all, whitelist tracked topics
+docs/*
+!docs/README.md
+!docs/architecture/
+!docs/configuration/
