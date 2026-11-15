@@ -42,7 +42,7 @@ export AWC_DEFAULT_IP=192.168.1.100
 | `--manual` | Force manual 6-digit pairing (no QR) |
 | `--wait` | Keep the single-device Enter prompt (linger with the QR to pair another phone) instead of connecting a ready device immediately |
 | `--all` | Connect to every discovered device without asking |
-| `--list` | List discovered devices and exit |
+| `-l`, `--list` | List discovered devices and exit — `awc -l` is the shorthand agents should reach for |
 | `--direct [IP[:PORT] [CODE]]` | Manual/remote path: no discovery, no QR. Connect-first by address; pairs only when unreachable (guided) or immediately when a code is given. `--direct` values come **last**; conflicts with `--ip`; composes with `--port` (connection port), `--watch`, `--debug` |
 | `--watch` | Reconnect forever until Ctrl+C (pairs when needed) |
 | `--on-connect CMD` | Shell command run after each successful connect; device in `$AWC_TARGET` |

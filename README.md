@@ -55,7 +55,7 @@ awc
 awc --all
 
 # List discovered devices without connecting
-awc --list
+awc -l              # == awc --list
 
 # Force manual mode (skip QR)
 awc --manual

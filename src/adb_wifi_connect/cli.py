@@ -166,7 +166,8 @@ def main():
                              "the QR to pair another phone) instead of "
                              "connecting immediately")
     parser.add_argument("--all", action="store_true", help="Connect to all discovered devices")
-    parser.add_argument("--list", action="store_true", help="List discovered devices and exit")
+    parser.add_argument("-l", "--list", action="store_true",
+                        help="List discovered devices and exit")
     parser.add_argument("--debug", action="store_true",
                         help="Enable debug logging (adb commands, mDNS events)")
     parser.add_argument("--qr", choices=["auto", "sixel", "ascii"],

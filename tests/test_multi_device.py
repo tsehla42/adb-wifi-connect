@@ -934,6 +934,17 @@ def test_main_list_flag():
     assert mock_print.called
 
 
+def test_main_list_short_flag():
+    """-l is an alias for --list: discovers, shows devices, exits."""
+    devices = [("192.168.1.167", "Pixel", False)]
+    with patch('adb_wifi_connect.cli.discover_all_phones', return_value=devices), \
+         patch('sys.argv', ['awc', '-l']), \
+         patch('builtins.print') as mock_print:
+        result = main()
+    assert result == []
+    assert mock_print.called
+
+
 def test_main_single_device_backward_compat():
     """Single device found connects directly without selection UI."""
     devices = [("192.168.1.167", "Pixel", True)]
