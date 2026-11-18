@@ -460,10 +460,11 @@ def test_single_device_prompt_enter_connects_without_qr_wait(capsys):
     mock_wait.assert_not_called()  # Task 8: no QR wait in this flow
     out = capsys.readouterr().out
     assert "Found 1 device:" in out, out
-    assert "1.2.3.4 X1" in out, out          # format_label row
+    # format_label row: connected, no serials slot -> ip:connect_port
+    assert "    Google Pixel 9 (Pixel 9) · 1.2.3.4:41234   Connected" in out, out
     assert "Press Enter to connect" in out, out
     assert "scan the QR to pair another phone" in out, out
-    assert "\nConnected: 1.2.3.4:41234" in out, out
+    assert "\nConnected: Google Pixel 9 (Pixel 9) · 1.2.3.4:41234" in out, out
 
 
 def test_single_device_ready_connects_eagerly_without_prompt(capsys):
@@ -499,7 +500,7 @@ def test_single_device_ready_connects_eagerly_without_prompt(capsys):
     out = capsys.readouterr().out
     assert "Found 1 device:" in out, out
     assert "Press Enter to connect" not in out, out
-    assert "\nConnected: 1.2.3.4:41234" in out, out
+    assert "\nConnected: Google Pixel 9 (Pixel 9) · 1.2.3.4:41234" in out, out
 
 
 def test_single_device_eager_failure_falls_back_to_prompt(capsys):

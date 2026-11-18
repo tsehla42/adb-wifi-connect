@@ -42,13 +42,15 @@ export AWC_DEFAULT_IP=192.168.1.100
 | `--manual` | Force manual 6-digit pairing (no QR) |
 | `--wait` | Keep the single-device Enter prompt (linger with the QR to pair another phone) instead of connecting a ready device immediately |
 | `--all` | Connect to every discovered device without asking |
-| `-l`, `--list` | List discovered devices and exit — `awc -l` is the shorthand agents should reach for |
+| `-l`, `--list` | List discovered devices and exit — `awc -l` is the shorthand agents should reach for. A connected phone's row ends in its adb serial (use it with `adb -s`); phones adb has connected are listed even when mDNS misses them |
+| `-v`, `--verbose` | With `-l` (`awc -lv`): under each row, the phone's live adb serials (incl. the mDNS-form duplicate), mDNS short name and connect port |
 | `--direct [IP[:PORT] [CODE]]` | Manual/remote path: no discovery, no QR. Connect-first by address; pairs only when unreachable (guided) or immediately when a code is given. `--direct` values come **last**; conflicts with `--ip`; composes with `--port` (connection port), `--watch`, `--debug` |
 | `--watch` | Reconnect forever until Ctrl+C (pairs when needed) |
 | `--on-connect CMD` | Shell command run after each successful connect; device in `$AWC_TARGET` |
 | `--qr auto\|sixel\|ascii` | QR rendering mode (default `ascii`; `auto` probes for Sixel — DA1 can advertise Sixel without rendering). Inside the multi-device selector the QR is always redrawn as ASCII art (a Sixel image can't be repainted in curses) |
 | `--adb-path PATH` | Path to the adb executable (default: `adb` on PATH) |
 | `--debug` | DEBUG logging: every adb command, mDNS event |
+| `--describe SERIAL…` | For scripts: print `SERIAL<TAB>Name (model) · SERIAL` per already-connected adb serial (`ip:port` or mDNS form) and exit — stdout carries nothing else; an unreadable phone comes back as its bare serial |
 
 Selection semantics: the list reflects **desired state** — checked
 devices get connected, checked-already stay, unchecked-but-connected

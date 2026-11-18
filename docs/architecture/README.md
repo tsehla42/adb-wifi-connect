@@ -22,6 +22,7 @@ that keeps older import paths working.
 |------------|-------------|
 | `awc` / `adb-connect` | console scripts → `cli:run()` (drops `main()`'s return so `sys.exit` never dumps reprs; exit 0 on success, 1 on failure) |
 | `python -m adb_wifi_connect` | `__main__.py` → `main()` (return value discarded by the expression statement) |
+| `awc --describe SERIAL…` | script helper, short-circuits before the banner: `flow.describe_serials()` reads each serial's identity in parallel and prints only `serial<TAB>Name (model) · serial` lines (unreadable → bare serial). No discovery, no QR. Used by clash-of-clans-farm's launchers to name their device picker |
 
 ## Discovery pipeline
 
@@ -37,20 +38,31 @@ QR (t≈0)  →  discover  →  enrich  →  drain  →  route  →  pair  →  
    and turns every scan into an `events` queue payload — routing happens
    at the waiting sites below.
 2. **Discover** — zeroconf listens on both ADB service types and returns
-   6-tuples `(ip, short_name, is_connected, is_paired, connect_port,
-   identity)`. `is_connected` recognizes both live serial forms
-   (`ip:port` and `adb-<short>._adb-tls-connect._tcp`); `identity` is a
-   reserved None slot at discovery. Returns after a 1s grace window from
-   the first device seen (checked on the 0.5s poll) so slower devices
-   are still collected. Status column priority: Connected >
-   Paired > Unpaired > Not connected.
+   7-tuples `(ip, short_name, is_connected, is_paired, connect_port,
+   identity, serials)`; `identity` is a reserved None slot at discovery.
+   Returns after a 1s grace window from the first device seen (checked
+   on the 0.5s poll), so a slow responder can be missed. That's why the
+   browse result then goes through `merge_connected` with adb's own view
+   (`adb devices` + `adb mdns services`). Slot 6 gets each phone's live
+   serials (`ip:port` first, then `adb-<short>._adb-tls-connect._tcp`),
+   and any network serial adb has connected that mDNS missed becomes its
+   own connected record. One phone listed twice by adb collapses to one
+   record, and USB/emulator serials are ignored. A phone adb already
+   has connected is therefore never missing from the list, even without
+   zeroconf installed. Status column priority: Connected > Paired >
+   Unpaired > Not connected.
 3. **Enrich** — `enrich_devices()` fills `identity` (slot 5) for paired
    records right after discovery: one `adb devices` snapshot, then
    parallel best-effort reads over the live serial (connecting a paired
    device first if needed, 3s cap, quiet). Prints `Reading device names…`
    only when a candidate exists; never raises, never disconnects, never
    mutates the discovery snapshots. `ui.format_label` turns identity into
-   the row label: `Human Name (model) · ip short_name`.
+   the row label: `Human Name (model) · <address>`, where the address is
+   the first live adb serial when connected (what `adb -s` takes), else
+   the bare ip; `awc -lv` adds each phone's serials, mDNS short name and
+   connect port under its row. The name part is
+   `ui.format_name(identity)`; `ui.format_row(identity, target)` builds the
+   `Human Name (model) · ip:port` form used once a phone is connected.
 4. **Drain** — queued scans are served first (`_early_scan_target`): a
    verified scan already is the target, so it is announced and the run
    ends before any selection UI could appear for other phones.
@@ -82,6 +94,29 @@ QR (t≈0)  →  discover  →  enrich  →  drain  →  route  →  pair  →  
    and confirmed with a real `adb shell echo test` round-trip.
 10. **Hook** — every success path runs `--on-connect` with `$AWC_TARGET`
     set to the connected `ip:port`.
+11. **Report** — the batch (2+ devices) prints one row per phone and a
+    named summary; the connect itself runs with
+    `connect_single_device(quiet=True)`, which drops its own progress
+    chatter (`Already connected` / `Connecting to` / `Connected` / adb
+    `->`/`<-` echoes / retries — `--debug` still logs the commands).
+    Interactive pairing output and the port-scan fallback progress still
+    print. Names come from the enrichment identity, else one
+    `read_identity` over the new target (`cli._identity_for`).
+
+    ```
+    Connecting 2 devices...
+      OnePlus 15 (CPH2745) · 192.168.1.100:41234   Connected
+      Samsung S21 (SM-G9960) · 192.168.1.101:40001   Already connected
+
+    ==================================================
+    SUMMARY: Connected 2/2 devices
+    ==================================================
+      OnePlus 15 (CPH2745) · 192.168.1.100:41234
+      Samsung S21 (SM-G9960) · 192.168.1.101:40001
+    ```
+
+    A failed phone gets `  <name> · <ip>   Failed`. The single-device
+    path's final line is named the same way: `Connected: <name> · ip:port`.
 
 ## mDNS service types
 
@@ -190,7 +225,7 @@ Per-device state tracked from mDNS events:
   cycles already know the phone is back) is the safety net for missed
   removal events.
 - Watch code unpacks discovery records **leniently** — the rescan reads
-  only the ip slot, extra slots are ignored — so the 6-tuple shape (and
+  only the ip slot, extra slots are ignored — so the 7-tuple shape (and
   any future slots) pass through without changes.
 - A silent (already-paired) reconnect attempt that fails downgrades the
   state to `"pair"`, so the next cycle offers the pairing flow.

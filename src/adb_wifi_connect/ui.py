@@ -92,20 +92,67 @@ def _status(rec):
 def format_label(rec):
     """Row label for a device record — never raises.
 
-    With identity (rec[5]): "Brand Marketing (model) · ip short_name" —
+    With identity (rec[5]): "Brand Marketing (model) · <address>" —
     marketing = marketname or device_name; no marketing falls back to
     brand+model; identity without a model drops the parens; no identity
-    (or a malformed record) degrades to "ip short_name".
+    (or a malformed record) degrades to "<address>". The address is the
+    phone's adb serial when connected (see _row_address), else its ip.
     """
     try:
-        ip, short = rec[0], rec[1]
+        ip = rec[0]
     except Exception:
         return ""
-    base = f"{ip} {short}"
+    base = _row_address(rec)
     try:
         identity = rec[5] if len(rec) > 5 else None
+        head = format_name(identity)
+        return f"{head} · {base}" if head else base
+    except Exception:
+        return base
+
+
+def _row_address(rec):
+    """Where a row points: a connected phone's first live adb serial (slot
+    6 — what `adb -s` takes), else ip:connect_port for a connected record
+    without serials (scan events), else the bare ip. Never raises."""
+    try:
+        ip = str(rec[0])
+    except Exception:
+        return ""
+    try:
+        connected = bool(rec[2]) if len(rec) > 2 else False
+        if connected:
+            serials = rec[6] if len(rec) > 6 else None
+            if serials:
+                return str(serials[0])
+            port = rec[4] if len(rec) > 4 else None
+            if port:
+                return f"{ip}:{port}"
+    except Exception:
+        pass
+    return ip
+
+
+def format_row(identity, target):
+    """"Name (model) · target" for one connected phone; bare target when
+    the identity yields no name. Never raises."""
+    try:
+        name = format_name(identity)
+    except Exception:
+        name = ""
+    return f"{name} · {target}" if name else str(target)
+
+
+def format_name(identity):
+    """Human name of an identity dict: "Brand Marketing (model)".
+
+    marketing = marketname or device_name; no marketing falls back to
+    brand+model; identity without a model drops the parens. Not a dict
+    (or unusable) -> "". Never raises.
+    """
+    try:
         if not isinstance(identity, dict):
-            return base
+            return ""
         brand = str(identity.get("brand") or "").strip()
         model = str(identity.get("model") or "").strip()
         marketing = str(identity.get("marketname") or "").strip()
@@ -119,17 +166,30 @@ def format_label(rec):
             name = f"{brand.capitalize()} {model}"
         else:
             name = model
-        head = f"{name} ({model})" if model else name
-        return f"{head} · {base}" if head else base
+        return f"{name} ({model})" if model else name
     except Exception:
-        return base
+        return ""
 
 
-def _print_device_list(devices):
-    """Print the discovered-device list header and entries."""
-    print(f"\nFound {len(devices)} devices:\n")
+def _print_device_list(devices, verbose=False):
+    """Print the discovered-device list header and entries. verbose adds
+    per-phone detail lines (live serials, mDNS short name, connect port);
+    a line whose value is unknown is omitted."""
+    n = len(devices)
+    print(f"\nFound {n} device{'' if n == 1 else 's'}:\n")
     for i, rec in enumerate(devices, 1):
         print(f"  {i}. {format_label(rec)}   {_status(rec)}")
+        if not verbose:
+            continue
+        serials = rec[6] if len(rec) > 6 else None
+        short = rec[1] if len(rec) > 1 else None
+        port = rec[4] if len(rec) > 4 else None
+        if serials:
+            print(f"     serials: {', '.join(str(s) for s in serials)}")
+        if short:
+            print(f"     mdns:    {short}")
+        if port:
+            print(f"     port:    {port}")
 
 
 def _run_noninteractive_selection(devices):
@@ -228,7 +288,8 @@ def _curses_selection(devices, qr_text=None, session=None):
             for line in qr_lines:
                 stdscr.addstr(line + "\n")  # flush-left, no padding
             stdscr.addstr("\n")
-        stdscr.addstr(f"Found {len(devices)} devices:\n\n")
+        n = len(devices)
+        stdscr.addstr(f"Found {n} device{'' if n == 1 else 's'}:\n\n")
         for row in rows:
             stdscr.addstr(row)
         if status:

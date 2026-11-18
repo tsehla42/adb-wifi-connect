@@ -20,14 +20,14 @@ def test_label_marketname_with_brand():
              'model': 'SM-G9960', 'device_name': ''}
     assert format_label(REC(ident)) == (
         'Samsung Galaxy S21+ (SM-G9960) · '
-        '192.168.1.19 A1B2C3D4E5F6-xyz123')
+        '192.168.1.19')
 
 
 def test_label_device_name_fallback():   # verified live: marketname ''
     ident = {'brand': 'samsung', 'marketname': '',
              'device_name': 'S21', 'model': 'SM-G9960'}
     assert format_label(REC(ident)) == (
-        'Samsung S21 (SM-G9960) · 192.168.1.19 A1B2C3D4E5F6-xyz123')
+        'Samsung S21 (SM-G9960) · 192.168.1.19')
 
 
 def test_label_brand_model_fallback():   # no marketing anywhere
@@ -35,11 +35,11 @@ def test_label_brand_model_fallback():   # no marketing anywhere
              'model': 'Pixel 7'}
     # name == brand+model, parens still carry model (rule 17)
     assert format_label(REC(ident)) == (
-        'Google Pixel 7 (Pixel 7) · 192.168.1.19 A1B2C3D4E5F6-xyz123')
+        'Google Pixel 7 (Pixel 7) · 192.168.1.19')
 
 
 def test_label_no_identity():
-    assert format_label(REC(None)) == '192.168.1.19 A1B2C3D4E5F6-xyz123'
+    assert format_label(REC(None)) == '192.168.1.19'
 
 
 def test_label_marketname_already_branded():
@@ -48,7 +48,7 @@ def test_label_marketname_already_branded():
              'model': 'SM-G9960', 'device_name': ''}
     assert format_label(REC(ident)) == (
         'Samsung Galaxy S21 (SM-G9960) · '
-        '192.168.1.19 A1B2C3D4E5F6-xyz123')
+        '192.168.1.19')
 
 
 def test_label_identity_without_model():
@@ -56,16 +56,16 @@ def test_label_identity_without_model():
     ident = {'brand': 'samsung', 'marketname': '', 'model': '',
              'device_name': 'S21'}
     assert format_label(REC(ident)) == (
-        'Samsung S21 · 192.168.1.19 A1B2C3D4E5F6-xyz123')
+        'Samsung S21 · 192.168.1.19')
     # ...and when name is empty too -> bare ip short_name
     blank = {'brand': '', 'marketname': '', 'model': '', 'device_name': ''}
-    assert format_label(REC(blank)) == '192.168.1.19 A1B2C3D4E5F6-xyz123'
+    assert format_label(REC(blank)) == '192.168.1.19'
 
 
 def test_label_short_tuple_without_identity_slot():
     # legacy 3-tuple record: no identity slot at all
     rec = ('192.168.1.19', 'A1B2C3D4E5F6-xyz123', False)
-    assert format_label(rec) == '192.168.1.19 A1B2C3D4E5F6-xyz123'
+    assert format_label(rec) == '192.168.1.19'
 
 
 def test_format_label_never_raises_on_malformed_records():
@@ -73,7 +73,7 @@ def test_format_label_never_raises_on_malformed_records():
     assert isinstance(format_label(('1.2.3.4',)), str)
     # truthy non-dict identity degrades to the bare label
     assert format_label(('1.2.3.4', 'X', False, False, None,
-                         'not-a-dict')) == '1.2.3.4 X'
+                         'not-a-dict')) == '1.2.3.4'
 
 
 # --- row printers wired to format_label ---
@@ -83,7 +83,7 @@ def test_print_device_list_row_uses_format_label(capsys):
              'device_name': 'S21'}
     _print_device_list([REC(ident)])
     out = capsys.readouterr().out
-    assert ('  1. Samsung S21 (SM-G9960) · 192.168.1.19 A1B2C3D4E5F6-xyz123'
+    assert ('  1. Samsung S21 (SM-G9960) · 192.168.1.19'
             '   Paired') in out, out
 
 
@@ -111,7 +111,7 @@ def test_curses_row_uses_format_label():
         _curses_selection(devices)
 
     expected = ('> [ ] 1. Samsung S21 (SM-G9960) · '
-                '192.168.1.19 A1B2C3D4E5F6-xyz123   Paired\n')
+                '192.168.1.19   Paired\n')
     assert expected in rows, rows
 
 
@@ -173,7 +173,7 @@ def test_read_identity_settings_null_sentinel_becomes_empty():
     assert "null" not in label.lower(), label
     assert label == (
         'Samsung SM-G9960 (SM-G9960) · '
-        '192.168.1.19 A1B2C3D4E5F6-xyz123')
+        '192.168.1.19')
 
 
 # --- flow.enrich_devices: orchestrator ---
@@ -310,3 +310,68 @@ def test_cli_calls_enrich_right_after_discovery():
         main()
     assert order == ['discovery', 'enrich'], order
     mock_enrich.assert_called_once_with(devices)
+
+
+# --- format_name / format_row / --describe ---
+
+S21_ID = {'marketname': '', 'brand': 'samsung', 'model': 'SM-G9960',
+          'device_name': 'S21'}
+ONEPLUS_ID = {'marketname': '', 'brand': 'OnePlus', 'model': 'CPH2745',
+              'device_name': 'OnePlus 15'}
+
+
+def test_format_name_matches_label_head():
+    from adb_wifi_connect.ui import format_name
+    assert format_name(S21_ID) == 'Samsung S21 (SM-G9960)'
+    assert format_name(None) == ''
+
+
+def test_format_row():
+    from adb_wifi_connect.ui import format_row
+    assert format_row(S21_ID, '192.168.88.249:46157') == (
+        'Samsung S21 (SM-G9960) · 192.168.88.249:46157')
+    assert format_row(None, '1.2.3.4:5555') == '1.2.3.4:5555'
+
+
+def test_describe_mdns_serial():
+    from adb_wifi_connect.flow import describe_serials
+    serial = 'adb-X._adb-tls-connect._tcp'
+    with patch('adb_wifi_connect.flow.adb.read_identity',
+               return_value=ONEPLUS_ID):
+        assert describe_serials([serial]) == [
+            (serial, f'OnePlus 15 (CPH2745) · {serial}')]
+
+
+def test_describe_partial_failure_keeps_order():
+    from adb_wifi_connect.flow import describe_serials
+    with patch('adb_wifi_connect.flow.adb.read_identity',
+               side_effect=lambda s: None if s == 'b:1' else ONEPLUS_ID):
+        result = describe_serials(['a:1', 'b:1', 'c:1'])
+    assert result == [('a:1', 'OnePlus 15 (CPH2745) · a:1'),
+                      ('b:1', 'b:1'),
+                      ('c:1', 'OnePlus 15 (CPH2745) · c:1')]
+
+
+def test_describe_cli_output_is_clean(capsys):
+    with patch('adb_wifi_connect.cli.describe_serials', create=True,
+               return_value=[('a:1', 'N (M) · a:1'), ('b:1', 'b:1')]), \
+         patch('adb_wifi_connect.cli.discover_all_phones') as mock_disc, \
+         patch('sys.argv', ['awc', '--describe', 'a:1', 'b:1']):
+        from adb_wifi_connect.cli import main
+        main()
+    assert capsys.readouterr().out == 'a:1\tN (M) · a:1\nb:1\tb:1\n'
+    mock_disc.assert_not_called()
+
+
+# --- awc -l: connected rows end in the adb serial ---
+
+def test_label_connected_uses_first_serial():
+    rec = ("10.0.0.9", "ABC", True, True, 46000, S21_ID,
+           ("10.0.0.9:46000", "adb-ABC._adb-tls-connect._tcp"))
+    assert format_label(rec) == 'Samsung S21 (SM-G9960) · 10.0.0.9:46000'
+
+
+def test_label_connected_without_serials_uses_port():
+    # scan-event record: connected, no serials slot
+    assert format_label(("10.0.0.9", "ABC", True, True, 46000, None)) == (
+        '10.0.0.9:46000')

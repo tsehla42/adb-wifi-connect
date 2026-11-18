@@ -214,13 +214,14 @@ def test_discover_records_carry_connect_port_and_identity_slot():
     by_ip = {rec[0]: rec for rec in result}
     assert set(by_ip) == {"192.168.1.167", "192.168.1.172"}
     connect_rec = by_ip["192.168.1.167"]
-    assert len(connect_rec) == 6
+    assert len(connect_rec) == 7
     assert connect_rec[4] == 41123
     assert connect_rec[5] is None
     pairing_rec = by_ip["192.168.1.172"]
-    assert len(pairing_rec) == 6
+    assert len(pairing_rec) == 7
     assert pairing_rec[4] is None
     assert pairing_rec[5] is None
+    assert connect_rec[6] == () and pairing_rec[6] == ()  # nothing live
 
 
 def test_connected_status_recognizes_mdns_form_serial():
@@ -446,9 +447,9 @@ def test_curses_selection_draws_qr_lines_above_list():
         " # # # \n"
         "### ###\n"
         "\n"
-        "Found 1 devices:\n"
+        "Found 1 device:\n"
         "\n"
-        "> [ ] 1. 192.168.1.167 Pixel   Not connected\n"
+        "> [ ] 1. 192.168.1.167   Not connected\n"
         "\n"
         "  ↑/↓ move · Space toggle · Enter connect · scan the QR to add "
         "· Ctrl+C quit\n"
@@ -691,9 +692,11 @@ def test_curses_selection_rows_over_width_omit_qr():
     itself exceeds the terminal columns, the QR is never stacked on top
     of a frame whose row count is already wrong (list-only attempt; the
     list itself is all that is left to draw)."""
+    long_name = {"brand": "samsung", "model": "SM-X999",
+                 "marketname": "Galaxy Very Long Marketing Name"}
     devices = [
-        ("192.168.100.200", "VeryLongPixelName", False),
-        ("192.168.100.201", "VeryLongGalaxyName", False),
+        ("192.168.100.200", "VeryLongPixelName", False, True, None, long_name),
+        ("192.168.100.201", "VeryLongGalaxyName", False, True, None, long_name),
     ]
     qr_lines = ["Q" * 20 for _ in range(7)]   # QR line fits 40 columns
     height = len(qr_lines) + len(devices) + 8  # and the height fits too

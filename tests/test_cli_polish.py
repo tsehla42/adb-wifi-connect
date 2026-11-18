@@ -135,25 +135,97 @@ def test_flow_already_connected_not_double_announced(capsys):
 
 # --- multi-device CLI: headers + no per-device duplicates ---
 
-def test_multi_cli_headers_cleaned_and_result_once(capsys):
-    # names arrive pre-cleaned from mdns (see
-    # test_discover_all_phones_returns_clean_names)
-    devices = [
-        ("1.2.3.4", "X123-y0", True),
-        ("1.2.3.5", "X999-z9", False),
-    ]
+S21_ID = {'marketname': '', 'brand': 'samsung', 'model': 'SM-G9960',
+          'device_name': 'S21'}
+ONEPLUS_ID = {'marketname': '', 'brand': 'OnePlus', 'model': 'CPH2745',
+              'device_name': 'OnePlus 15'}
+NAMED_DEVICES = [
+    ("1.2.3.4", "X123-y0", True, True, 5555, ONEPLUS_ID),
+    ("1.2.3.5", "X999-z9", False, True, 5556, S21_ID),
+]
+
+
+def _run_all(devices, connect, identity=lambda serial: None):
+    """main() with --all over fixed records: no discovery, no enrichment
+    traffic, no real adb."""
     with patch('adb_wifi_connect.cli.discover_all_phones',
                return_value=devices), \
+         patch('adb_wifi_connect.cli.enrich_devices',
+               side_effect=lambda recs: recs), \
+         patch('adb_wifi_connect.cli.adb.read_identity',
+               side_effect=identity), \
+         patch('adb_wifi_connect.cli.adb.run_adb_disconnect',
+               return_value=[]), \
          patch('adb_wifi_connect.cli.connect_single_device',
-               side_effect=lambda ip, **kw: f"{ip}:5555"), \
+               side_effect=connect), \
          patch('sys.argv', ['awc', '--all']):
+        from adb_wifi_connect.cli import main
+        return main()
+
+
+def test_multi_connect_rows_and_named_summary(capsys):
+    def connect(ip, **kw):
+        assert kw["quiet"] is True
+        return f"{ip}:5555"
+    _run_all(NAMED_DEVICES, connect)
+    out = capsys.readouterr().out
+    assert "Connecting 2 devices..." in out, out
+    assert ("  OnePlus 15 (CPH2745) · 1.2.3.4:5555   Already connected"
+            in out), out
+    assert "  Samsung S21 (SM-G9960) · 1.2.3.5:5555   Connected" in out, out
+    summary = out.split("SUMMARY")[1]
+    assert "  OnePlus 15 (CPH2745) · 1.2.3.4:5555\n" in summary, out
+    assert "  Samsung S21 (SM-G9960) · 1.2.3.5:5555\n" in summary, out
+    assert "---" not in out.split("SUMMARY")[0].replace("=" * 50, ""), out
+    assert "CONNECTING TO" not in out, out
+    assert "_adb-tls" not in out, "raw mDNS instance name leaked into UI"
+
+
+def test_multi_connect_failure_row(capsys):
+    def connect(ip, **kw):
+        return None if ip == "1.2.3.5" else f"{ip}:5555"
+    _run_all(NAMED_DEVICES, connect)
+    out = capsys.readouterr().out
+    assert "  Samsung S21 (SM-G9960) · 1.2.3.5   Failed" in out, out
+    assert "SUMMARY: Connected 1/2 devices" in out, out
+    assert "  OnePlus 15 (CPH2745) · 1.2.3.4:5555\n" in out.split("SUMMARY")[1]
+
+
+def test_summary_reads_identity_when_missing(capsys):
+    devices = [("1.2.3.4", "X123-y0", False), ("1.2.3.5", "X999-z9", False)]
+    _run_all(devices, lambda ip, **kw: f"{ip}:5555",
+             identity=lambda s: ONEPLUS_ID if s == "1.2.3.4:5555" else None)
+    summary = capsys.readouterr().out.split("SUMMARY")[1]
+    assert "  OnePlus 15 (CPH2745) · 1.2.3.4:5555\n" in summary, summary
+    assert "  1.2.3.5:5555\n" in summary, summary
+
+
+def test_quiet_connect_prints_nothing_on_success(capsys):
+    proc = MagicMock(stdout="connected to 1.2.3.4:40000", returncode=0)
+    with patch('adb_wifi_connect.flow.is_device_connected',
+               return_value=None), \
+         patch('adb_wifi_connect.adb.subprocess.run', return_value=proc):
+        from adb_wifi_connect.flow import connect_single_device
+        result = connect_single_device("1.2.3.4", port=40000,
+                                       skip_pair=True, quiet=True)
+    assert result == "1.2.3.4:40000"
+    assert capsys.readouterr().out == ""
+
+
+def test_single_device_connected_line_named(capsys):
+    devices = [("1.2.3.4", "X", True, True, 5555, ONEPLUS_ID)]
+    with patch('adb_wifi_connect.cli.discover_all_phones',
+               return_value=devices), \
+         patch('adb_wifi_connect.cli.enrich_devices',
+               side_effect=lambda recs: recs), \
+         patch('adb_wifi_connect.cli.connect_single_device',
+               return_value="1.2.3.4:5555"), \
+         patch('sys.stdin.isatty', return_value=False), \
+         patch('sys.argv', ['awc']):
         from adb_wifi_connect.cli import main
         main()
     out = capsys.readouterr().out
-    assert "--- X123-y0 (1.2.3.4) ---" in out, out
-    assert "_adb-tls" not in out, "raw mDNS instance name leaked into UI"
-    # result appears once — in the summary only, not also per-device
-    assert out.count("1.2.3.5:5555") == 1, out
+    assert "Connected: OnePlus 15 (CPH2745) · 1.2.3.4:5555" in out, out
 
 
 def test_batch_drain_appends_scanned_phone(capsys):
@@ -431,10 +503,10 @@ def test_device_list_status_priority(capsys):
     ]
     _print_device_list(devices)
     out = capsys.readouterr().out
-    # new contract: 'ip short_name' label (no identity yet), status after
-    # three spaces — the old 'name (ip) - status' shape is gone
+    # label = address (no identity yet), status after three spaces; the
+    # mDNS short name is no longer in the row (it moved to -v)
     assert "A (1.2.3.4)" not in out
-    assert "  1. 1.2.3.4 A   Connected" in out
-    assert "  2. 1.2.3.5 B   Paired" in out
-    assert "  3. 1.2.3.6 C   Unpaired" in out
-    assert "  4. 1.2.3.7 D   Not connected" in out  # unknown stays generic
+    assert "  1. 1.2.3.4   Connected" in out
+    assert "  2. 1.2.3.5   Paired" in out
+    assert "  3. 1.2.3.6   Unpaired" in out
+    assert "  4. 1.2.3.7   Not connected" in out  # unknown stays generic

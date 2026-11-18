@@ -56,6 +56,12 @@ awc --all
 
 # List discovered devices without connecting
 awc -l              # == awc --list
+#   1. OnePlus 15 (CPH2745) · 192.168.1.100:41234   Connected   <- serial for adb -s
+awc -lv             # + each phone's serials, mDNS name and connect port
+
+# Names for already-connected serials (for scripts): one
+# "SERIAL<TAB>Name (model) · SERIAL" line each; unreadable -> bare serial
+awc --describe 192.168.1.100:5555 adb-XXXX._adb-tls-connect._tcp
 
 # Force manual mode (skip QR)
 awc --manual
@@ -212,10 +218,24 @@ no selection needed.
 
 Found 2 devices:
 
-  [x] 1. Samsung Galaxy S24 (SM-S921B) · 192.168.1.100 A1B2C3D4E5F6-xyz123   Connected
-  [ ] 2. Google Pixel 7 (Pixel 7) · 192.168.1.101 a1b2c3d4e5f6   Unpaired
+  [x] 1. Samsung Galaxy S24 (SM-S921B) · 192.168.1.100:41234   Connected
+  [ ] 2. Google Pixel 7 (Pixel 7) · 192.168.1.101   Unpaired
 
   ↑/↓ move · Space toggle · Enter connect · scan the QR to add · Ctrl+C quit
+```
+
+After confirming, each phone gets one named row, then a summary:
+
+```
+Connecting 2 devices...
+  Samsung Galaxy S24 (SM-S921B) · 192.168.1.100:41234   Already connected
+  Google Pixel 7 (Pixel 7) · 192.168.1.101:40001   Connected
+
+==================================================
+SUMMARY: Connected 2/2 devices
+==================================================
+  Samsung Galaxy S24 (SM-S921B) · 192.168.1.100:41234
+  Google Pixel 7 (Pixel 7) · 192.168.1.101:40001
 ```
 
 ## Dependencies

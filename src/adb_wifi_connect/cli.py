@@ -7,10 +7,10 @@ import time
 from . import adb
 from .env import load_env
 from .flow import (connect, connect_single_device, start_pairing_session,
-                   direct_connect, enrich_devices)
+                   direct_connect, enrich_devices, describe_serials)
 from .mdns import discover_all_phones
 from .ui import (select_devices, _print_device_list, format_label, _status,
-                 poll_stdin)
+                 format_row, poll_stdin)
 from .watch import watch_loop
 
 log = logging.getLogger(__name__)
@@ -52,6 +52,28 @@ def _drain_scan_events(session):
             scanned.append(event)
         elif kind == "scan-failed":
             print(f"  Pairing failed for {event.get('ip')} — scan again")
+
+
+def _record_identity(rec):
+    """Identity dict carried by an enriched record (index 5), else None."""
+    try:
+        ident = rec[5] if len(rec) > 5 else None
+    except Exception:
+        return None
+    return ident if isinstance(ident, dict) else None
+
+
+def _identity_for(rec, target):
+    """Identity for a connected phone's row: the enrichment one when the
+    record has it, else one quiet read over the fresh target (a phone
+    paired during this run was never enriched). Never raises."""
+    ident = _record_identity(rec)
+    if ident is not None:
+        return ident
+    try:
+        return adb.read_identity(target)
+    except Exception:
+        return None
 
 
 def _verify_scanned(event):
@@ -168,6 +190,9 @@ def main():
     parser.add_argument("--all", action="store_true", help="Connect to all discovered devices")
     parser.add_argument("-l", "--list", action="store_true",
                         help="List discovered devices and exit")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="With -l: add each phone's adb serials, mDNS "
+                             "name and connect port (combine: awc -lv)")
     parser.add_argument("--debug", action="store_true",
                         help="Enable debug logging (adb commands, mDNS events)")
     parser.add_argument("--qr", choices=["auto", "sixel", "ascii"],
@@ -183,6 +208,11 @@ def main():
     parser.add_argument("--watch", action="store_true",
                         help="Watch mode: keep reconnecting until Ctrl+C "
                              "(pairs when needed, runs --on-connect every time)")
+    parser.add_argument("--describe", nargs="+", metavar="SERIAL",
+                        default=None,
+                        help="Print 'SERIAL<TAB>Name (model) · SERIAL' for "
+                             "each connected adb serial and exit (for "
+                             "scripts; no discovery, no QR)")
     parser.add_argument("--adb-path", default=None, metavar="PATH",
                         help="Path to the adb executable (default: adb on PATH)")
     args = parser.parse_args()
@@ -201,6 +231,13 @@ def main():
     if args.adb_path:
         adb.ADB_PATH = args.adb_path
         log.debug("adb path: %s", adb.ADB_PATH)
+
+    # Script helper: names for already-connected serials — stdout carries
+    # ONLY the tab-separated rows (callers parse it)
+    if args.describe is not None:
+        for serial, label in describe_serials(args.describe):
+            print(f"{serial}\t{label}")
+        return None
 
     print("=== ADB WiFi Connection ===\n")
 
@@ -284,7 +321,7 @@ def main():
 
     # --list flag: show devices and exit
     if args.list:
-        _print_device_list(devices)
+        _print_device_list(devices, verbose=args.verbose)
         return []
 
     # Single device found: one status block, then connect. A TTY gets
@@ -307,7 +344,8 @@ def main():
                     short_name=rec[1], connect_port=_record_port(rec),
                     **ckw))
                 if result:
-                    print(f"\nConnected: {result}")
+                    print(f"\nConnected: "
+                          f"{format_row(_identity_for(rec, result), result)}")
                     return result
                 print(f"  Could not connect to {ip} — press Enter to "
                       f"retry{qr_clause}")
@@ -325,7 +363,8 @@ def main():
             short_name=rec[1], connect_port=_record_port(rec), **ckw))
 
         if result:
-            print(f"\nConnected: {result}")
+            print(f"\nConnected: "
+                  f"{format_row(_identity_for(rec, result), result)}")
             return result
         else:
             print(f"\nFailed to connect to {ip}")
@@ -366,12 +405,13 @@ def main():
         targets = [devices[i][0] for i in selected]
         return watch_loop(targets, **ckw)
 
-    # Connect to selected devices
-    print(f"\n{'='*50}")
-    print(f"CONNECTING TO {len(selected)} DEVICE(S)")
-    print(f"{'='*50}\n")
+    # Connect to selected devices: one named row per phone — the connect
+    # itself runs quiet; interactive pairing (unpaired phone) still prints
+    count = len(selected)
+    print(f"\nConnecting {count} device{'s' if count != 1 else ''}...")
 
-    results = []
+    results = []   # targets (main()'s return value)
+    rows = []      # named summary rows, same order
     for idx in selected:
         # A scan that lands BETWEEN connects joins this run too: drain
         # before each call — the appended record then short-circuits as
@@ -379,22 +419,26 @@ def main():
         _absorb_scanned(session, devices, selected)
         rec = devices[idx]
         ip, name, connected = rec[:3]
-        print(f"\n--- {name} ({ip}) ---")
         result = _guarded(lambda: connect_single_device(
             ip, session=session, paired=_record_paired(rec),
-            short_name=rec[1], connect_port=_record_port(rec), **ckw))
+            short_name=rec[1], connect_port=_record_port(rec),
+            quiet=True, **ckw))
 
         if result:
+            row = format_row(_identity_for(rec, result), result)
             results.append(result)
+            rows.append(row)
+            status = "Already connected" if connected else "Connected"
+            print(f"  {row}   {status}")
         else:
-            print(f"  Failed: {ip}")
+            print(f"  {format_row(_record_identity(rec), ip)}   Failed")
 
     # Summary
     print(f"\n{'='*50}")
     print(f"SUMMARY: Connected {len(results)}/{len(selected)} devices")
     print(f"{'='*50}")
-    for r in results:
-        print(f"  {r}")
+    for row in rows:
+        print(f"  {row}")
 
     if not results:
         sys.exit(1)

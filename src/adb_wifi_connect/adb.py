@@ -82,6 +82,28 @@ def connected_serials():
     return serials
 
 
+def mdns_services():
+    """[(short, ip, port), ...] for every `_adb-tls-connect._tcp` row of
+    `adb mdns services` (instance `adb-<short>` -> short). adb's own mDNS
+    view — gives the IP behind an mDNS-form serial. [] on any failure."""
+    rows = []
+    try:
+        proc = subprocess.run([ADB_PATH, "mdns", "services"],
+                              capture_output=True, text=True, timeout=5)
+        for line in (proc.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 3 or parts[1].strip() != "_adb-tls-connect._tcp":
+                continue
+            name = parts[0].strip()
+            host, _, port = parts[2].strip().rpartition(":")
+            if not name.startswith("adb-") or not host or not port.isdigit():
+                continue
+            rows.append((name[len("adb-"):], host, int(port)))
+    except Exception:
+        return []
+    return rows
+
+
 def read_identity(serial):
     """Read a device's human-readable identity over adb in ONE quiet call.
     Returns {"marketname", "brand", "model", "device_name"} with "" for
@@ -197,14 +219,16 @@ def run_on_connect(cmd, target):
         log.debug("on-connect hook failed", exc_info=True)
 
 
-def connect_with_retries(ip, port, retries=3, delay=1.0):
+def connect_with_retries(ip, port, retries=3, delay=1.0, echo=True):
     """Try connecting to the same port multiple times.
-    Returns True on success."""
+    Returns True on success. echo=False keeps it silent (no adb echoes,
+    no retry lines)."""
     for attempt in range(retries):
         if attempt > 0:
-            print(f"  Retry {attempt}/{retries-1}...")
+            if echo:
+                print(f"  Retry {attempt}/{retries-1}...")
             time.sleep(delay)
-        if run_adb_connect(ip, port):
+        if run_adb_connect(ip, port, echo=echo):
             return True
     return False
 

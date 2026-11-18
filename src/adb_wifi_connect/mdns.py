@@ -1,8 +1,9 @@
 import logging
+import re
 import threading
 import time
 
-from .adb import connected_serials
+from .adb import connected_serials, mdns_services
 
 log = logging.getLogger(__name__)
 
@@ -145,18 +146,98 @@ def discover_connection_port(timeout=10):
     return result[0], result[1]
 
 
+_MDNS_SUFFIX = "._adb-tls-connect._tcp"
+_IPV4 = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+
+
+def _network_serial(serial):
+    """("ip", ip, port) for an ip:port serial with a dotted-IPv4 host,
+    ("mdns", short, None) for an mDNS-form serial, else None (USB,
+    emulator, anything without a network identity)."""
+    if serial.startswith("adb-") and serial.endswith(_MDNS_SUFFIX):
+        return ("mdns", serial[len("adb-"):-len(_MDNS_SUFFIX)], None)
+    host, sep, port = serial.rpartition(":")
+    if sep and _IPV4.match(host) and port.isdigit():
+        return ("ip", host, int(port))
+    return None
+
+
+def merge_connected(records, serials, services):
+    """Attach live adb serials to discovery records and add phones adb has
+    connected that mDNS missed. Pure: no I/O, never raises on odd input.
+
+    Returns 7-tuples (ip, short_name, is_connected, is_paired,
+    connect_port, identity, serials): slot 6 holds the phone's live
+    serials, ip:port forms first, then the mDNS form. Unmatched network
+    serials are grouped by IP (an mDNS serial's IP comes from `services`
+    by short name; unknown -> skipped) into new connected+paired records.
+    """
+    by_short = {short: (ip, port) for short, ip, port in services}
+    by_ip = {}
+    for short, ip, port in services:
+        by_ip.setdefault(ip, (short, port))
+
+    # mDNS serials of discovered phones belong to those records (matched
+    # by name below) — never let adb's own, possibly stale, mDNS view turn
+    # them into a second row for the same phone
+    discovered_shorts = {rec[1] for rec in records
+                         if len(rec) > 1 and rec[1]}
+
+    # group every network serial by IP: ip -> {"ip": [...], "mdns": [...]}
+    groups = {}
+    for serial in sorted(serials):
+        kind = _network_serial(serial)
+        if kind is None:
+            continue
+        if kind[0] == "ip":
+            ip = kind[1]
+        elif kind[1] in discovered_shorts:
+            continue
+        else:
+            ip = by_short.get(kind[1], (None, None))[0]
+            if ip is None:
+                continue
+        groups.setdefault(ip, {"ip": [], "mdns": []})[kind[0]].append(serial)
+
+    def ordered(group):
+        return tuple(group["ip"] + group["mdns"]) if group else ()
+
+    result = []
+    for rec in records:
+        rec = tuple(rec) + (None,) * max(0, 6 - len(rec))
+        ip, short = rec[0], rec[1]
+        group = groups.pop(ip, None) or {"ip": [], "mdns": []}
+        if short:
+            # this phone's own mDNS serial, even when adb could not tell
+            # us its IP — match by name
+            mine = f"adb-{short}{_MDNS_SUFFIX}"
+            if mine in serials and mine not in group["mdns"]:
+                group["mdns"].append(mine)
+        own = ordered(group)
+        result.append(rec[:2] + (bool(own) or bool(rec[2]),) + rec[3:6]
+                      + (own,))
+
+    for ip, group in groups.items():
+        short, port = by_ip.get(ip, ("", None))
+        if port is None and group["ip"]:
+            port = int(group["ip"][0].rpartition(":")[2])
+        result.append((ip, short, True, True, port, None, ordered(group)))
+    return result
+
+
 def discover_all_phones(timeout=15, grace=1.0):
     """
     Discover ALL Android devices via mDNS.
-    Returns list of 6-tuples (ip, short_name, is_connected, is_paired,
-    connect_port, identity): connect_port is the _adb-tls-connect record's
+    Returns list of 7-tuples (ip, short_name, is_connected, is_paired,
+    connect_port, identity, serials) — see merge_connected: connect_port is the _adb-tls-connect record's
     port (None when only the pairing service was seen), identity is a
     reserved slot — always None at discovery.
     Returns early `grace` seconds after the first device is seen —
     devices still arriving inside that window are collected too.
     """
     if Zeroconf is None:
-        return []
+        # No mDNS library: phones adb already has connected still count
+        return merge_connected([], connected_serials(), mdns_services())
 
     lock = threading.Lock()
     found_devices = {}  # ip -> (name, is_paired, connect_port)
@@ -191,4 +272,6 @@ def discover_all_phones(timeout=15, grace=1.0):
         result.append((ip, short_name, is_connected, is_paired,
                        connect_port, None))
 
-    return result
+    # A phone adb already has connected is never missing from the list
+    # (mDNS stops 1s after the first reply — a slow responder is missed)
+    return merge_connected(result, serials, mdns_services())

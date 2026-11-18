@@ -15,7 +15,7 @@ from .mdns import (discover_connection_port, discover_all_phones,
                    _resolve_host, _browse, _short_service_name,
                    MDNS_TYPE, MDNS_CONNECT_TYPE, Zeroconf)
 from .ui import (ask_pairing_code, ask_pairing_port, ask_connection_port,
-                 ask_ip, poll_stdin, select_devices)
+                 ask_ip, poll_stdin, select_devices, format_row)
 
 log = logging.getLogger(__name__)
 
@@ -280,6 +280,32 @@ def enrich_devices(devices):
     return enriched
 
 
+def describe_serials(serials):
+    """[(serial, "Name (model) · serial"), ...] for adb serials, in input
+    order. Identities are read in parallel (read_identity: one quiet adb
+    call, 3s cap); an unreadable phone keeps its bare serial. Prints
+    nothing, never raises."""
+    try:
+        serials = [str(s) for s in serials]
+    except Exception:
+        return []
+    if not serials:
+        return []
+    try:
+        with ThreadPoolExecutor(max_workers=len(serials)) as pool:
+            idents = list(pool.map(_safe_identity, serials))
+    except Exception:
+        idents = [None] * len(serials)
+    return [(s, format_row(i, s)) for s, i in zip(serials, idents)]
+
+
+def _safe_identity(serial):
+    try:
+        return adb.read_identity(serial)
+    except Exception:
+        return None
+
+
 def parse_direct_target(text):
     """Parse 'ip' or 'ip:port' for --direct.
     Returns (host, port|None), or (None, None) when invalid."""
@@ -481,7 +507,7 @@ def wait_for_scanned_event(session, tick=0.5):
 def connect_single_device(ip, port=None, skip_pair=False, manual=False,
                           qr_mode="auto", on_connect=None, session=None,
                           paired=False, short_name=None,
-                          connect_port=None):
+                          connect_port=None, quiet=False):
     """
     Connect to a single device. Returns "ip:port" on success, None on failure.
     When port is provided, skips mDNS discovery and port scanning.
@@ -493,11 +519,16 @@ def connect_single_device(ip, port=None, skip_pair=False, manual=False,
     paired=True skips the pairing branch entirely (no session, no QR wait,
     no manual prompts); short_name + connect_port enable reusing an already
     live mDNS-form transport instead of opening a duplicate one (spec §5).
+    quiet=True drops the progress chatter (Already connected / Connecting
+    to / Connected / adb echoes / retries) — the caller prints its own row.
+    Interactive pairing output and the final failure line still print.
     """
+    echo = not quiet
+
     def success(target, announce=True):
         # Announce fresh connects only — already-announced states must
         # not produce a second "Connected:" line.
-        if announce:
+        if announce and not quiet:
             print(f"  Connected: {target}")
         run_on_connect(on_connect, target)
         return target
@@ -505,7 +536,8 @@ def connect_single_device(ip, port=None, skip_pair=False, manual=False,
     # Already connected?
     connected_port = is_device_connected(ip)
     if connected_port:
-        print(f"  Already connected: {ip}:{connected_port}")
+        if not quiet:
+            print(f"  Already connected: {ip}:{connected_port}")
         return success(f"{ip}:{connected_port}", announce=False)
 
     # Auto-detect non-interactive mode
@@ -560,7 +592,8 @@ def connect_single_device(ip, port=None, skip_pair=False, manual=False,
             print("  Paired successfully!")
 
     # Connection
-    print(f"\n  Connecting to {ip}...")
+    if not quiet:
+        print(f"\n  Connecting to {ip}...")
 
     # Transport reuse (spec §5) — FIRST check: a phone already live under
     # its mDNS-form serial needs no second adb connect and no port scan.
@@ -572,7 +605,7 @@ def connect_single_device(ip, port=None, skip_pair=False, manual=False,
 
     # If port specified, skip discovery and connect directly
     if port is not None:
-        if connect_with_retries(ip, port, retries=3, delay=1.0):
+        if connect_with_retries(ip, port, retries=3, delay=1.0, echo=echo):
             return success(f"{ip}:{port}")
         print(f"  Failed to connect to {ip}:{port}")
         return None
@@ -583,7 +616,8 @@ def connect_single_device(ip, port=None, skip_pair=False, manual=False,
         if connect_ip:
             connect_ip = _resolve_host(connect_ip)
             ip = connect_ip
-        if connect_with_retries(ip, connect_port, retries=3, delay=1.0):
+        if connect_with_retries(ip, connect_port, retries=3, delay=1.0,
+                                echo=echo):
             return success(f"{ip}:{connect_port}")
 
     # Fall back to port scanning
@@ -593,14 +627,15 @@ def connect_single_device(ip, port=None, skip_pair=False, manual=False,
 
     # Last resort: common ports
     for try_port in [5555, 5556]:
-        if run_adb_connect(ip, try_port):
+        if run_adb_connect(ip, try_port, echo=echo):
             return success(f"{ip}:{try_port}")
 
     # Final fallback: ask user for connection port
     if sys.stdin.isatty():
         print(f"\n  Auto-discovery failed for {ip}")
         manual_port = ask_connection_port()
-        if connect_with_retries(ip, manual_port, retries=3, delay=1.0):
+        if connect_with_retries(ip, manual_port, retries=3, delay=1.0,
+                                echo=echo):
             return success(f"{ip}:{manual_port}")
 
     print(f"  Failed to connect to {ip}")
