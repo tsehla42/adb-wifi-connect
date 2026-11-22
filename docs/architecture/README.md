@@ -175,7 +175,8 @@ mode uses this to reconnect silently instead of showing a QR code again.
    `stop()` ends the listener within the current browse tick.
 
 **QR inside the selector:** with multiple devices, the session's QR
-payload is redrawn above the device list — ASCII lines only, all-or-nothing:
+payload is redrawn CENTERED above the device list — ASCII lines only,
+all-or-nothing:
 the block is drawn only when it renders *and* the full frame fits the
 terminal — height (`qr lines + devices + 8 + (1 if status) ≤ rows`) AND
 width (no QR line and no device row may exceed the columns: an over-long
@@ -183,7 +184,9 @@ line wraps in ncurses and consumes rows the height term never counted),
 otherwise the list runs without it. A Sixel image cannot be repainted
 inside curses, so the in-selector QR is always ASCII regardless of
 `--qr`. A scan while the selector is open acts as confirm: the phone is
-appended to the list, force-checked, and returned immediately.
+force-checked and returned immediately — appended to the list only when
+its IP is not already there, so a phone that is already listed (it
+scanned the QR while connected) can never appear as a duplicate row.
 
 The foreground wait interleaves `ui.poll_stdin` (select on POSIX, kbhit
 on Windows) with bounded queue gets — pairing still completes on any

@@ -412,8 +412,9 @@ def test_select_devices_signature_passes_qr_and_session():
 
 
 def test_curses_selection_draws_qr_lines_above_list():
-    """QR lines render flush-left above the device list, in the exact
-    redraw order, when the fit check passes."""
+    """QR lines render CENTERED above the device list (same horizontal
+    centering as qr._display_qr_ascii), in the exact redraw order, when
+    the fit check passes."""
     devices = [("192.168.1.167", "Pixel", False)]
     qr_lines = ["### ###", " # # # ", "### ###"]
     rows = []
@@ -439,13 +440,14 @@ def test_curses_selection_draws_qr_lines_above_list():
         from adb_wifi_connect.ui import _curses_selection
         result = _curses_selection(devices, qr_text="WIFI:T:ADB;S:x;P:y;;")
 
+    pad = " " * ((80 - 7) // 2)   # centered like qr._display_qr_ascii
     assert result == []
     assert "".join(rows) == (
         "=== ADB WiFi Connection ===\n"
         "\n"
-        "### ###\n"
-        " # # # \n"
-        "### ###\n"
+        f"{pad}### ###\n"
+        f"{pad} # # # \n"
+        f"{pad}### ###\n"
         "\n"
         "Found 1 device:\n"
         "\n"
@@ -749,6 +751,44 @@ def test_curses_selection_scan_event_appends_and_returns():
     assert result == [2]
     assert len(devices) == 3, "same list must grow for cli's batch"
     assert devices[2] == ("9.9.9.9", "PIXEL", True, True, 41234, identity)
+
+
+def test_curses_selection_scan_of_listed_phone_checks_existing_row():
+    """A 'scanned' event whose IP is ALREADY in the devices list must
+    NOT append a duplicate record (that produced '3 devices' with one
+    phone listed twice) — the scan force-checks the EXISTING row and
+    still returns immediately (scan acts as confirm)."""
+    devices = [
+        ("192.168.1.167", "Pixel", False),
+        ("192.168.1.172", "Samsung", True),
+    ]
+    identity = {"brand": "google", "model": "Pixel 9"}
+    events = queue.Queue()
+    events.put({"kind": "scanned", "ip": "192.168.1.167", "short": "Pixel",
+                "port": 41234, "target": "192.168.1.167:41234",
+                "identity": identity})
+    session = MagicMock()
+    session.events = events
+
+    def fake_wrapper(main_func):
+        keys = [-1]  # one timeout tick — no real key pressed
+
+        class FakeStdscr:
+            def clear(self): pass
+            def addstr(self, s): pass
+            def refresh(self): pass
+            def timeout(self, ms): pass
+            def getch(self): return keys.pop(0)
+
+        return main_func(FakeStdscr())
+
+    with patch('curses.wrapper', side_effect=fake_wrapper), \
+         patch('curses.curs_set'):
+        from adb_wifi_connect.ui import _curses_selection
+        result = _curses_selection(devices, session=session)
+
+    assert result == [0, 1], "existing row of the scanned phone is checked"
+    assert len(devices) == 2, "already-listed phone must not be appended"
 
 
 def test_curses_selection_scan_failed_shows_status_and_keeps_waiting():

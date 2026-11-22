@@ -233,11 +233,14 @@ def _curses_selection(devices, qr_text=None, session=None):
     """Curses-based interactive checkbox selection.
 
     qr_text renders the pairing QR above the list (all-or-nothing: only
-    when it renders AND the full frame fits — height AND width; flush-
-    left, ASCII lines only, a Sixel image cannot be redrawn inside
-    curses). session drains scan events while keys are idle (200ms
-    poll): a 'scanned' phone appends its record to THIS devices list,
-    force-checks it, and returns immediately — the scan acts as
+    when it renders AND the full frame fits — height AND width; ASCII
+    lines only, a Sixel image cannot be redrawn inside curses — drawn
+    horizontally CENTERED, like qr._display_qr_ascii prints it).
+    session drains scan events while keys are idle (200ms
+    poll): a 'scanned' phone force-checks ITS row and returns
+    immediately — appended as a new record only when that IP is not
+    already listed (a listed phone scanning the QR must never produce
+    a duplicate row) — the scan acts as
     confirm, cli's batch prints the row's single status line.
     'scan-failed' sets a status line and the selector keeps waiting.
     The devices list is never copied.
@@ -285,8 +288,13 @@ def _curses_selection(devices, qr_text=None, session=None):
                 and len(qr_lines) + len(devices) + 8 + (1 if status else 0)
                 <= size.lines
                 and max(len(line) for line in qr_lines) <= size.columns):
+            # horizontally centered from the block's max width — the
+            # same pad qr._display_qr_ascii uses (padded width never
+            # exceeds columns: line <= max <= columns)
+            pad = " " * max(0, (size.columns
+                                - max(len(line) for line in qr_lines)) // 2)
             for line in qr_lines:
-                stdscr.addstr(line + "\n")  # flush-left, no padding
+                stdscr.addstr(pad + line + "\n")
             stdscr.addstr("\n")
         n = len(devices)
         stdscr.addstr(f"Found {n} device{'' if n == 1 else 's'}:\n\n")
@@ -299,10 +307,11 @@ def _curses_selection(devices, qr_text=None, session=None):
 
     def _absorb_events():
         """One bounded drain of the session queue (get_nowait until
-        Empty): 'scanned' appends (ip, short, True, True, port, identity)
-        to devices, force-checks it, and returns True so the caller
-        returns immediately; 'scan-failed' sets the status line.
-        No session -> nothing to drain."""
+        Empty): 'scanned' force-checks the phone's row — appended as
+        (ip, short, True, True, port, identity) ONLY when that IP is
+        not already in devices (no duplicate rows), and returns True so
+        the caller returns immediately; 'scan-failed' sets the status
+        line. No session -> nothing to drain."""
         nonlocal status
         if session is None:
             return False
@@ -313,10 +322,15 @@ def _curses_selection(devices, qr_text=None, session=None):
                 return False
             kind = event.get("kind")
             if kind == "scanned":
-                devices.append((event.get("ip"), event.get("short"), True,
-                                True, event.get("port"),
-                                event.get("identity")))
-                selected.add(len(devices) - 1)
+                ip = event.get("ip")
+                idx = next((i for i, rec in enumerate(devices)
+                            if rec and rec[0] == ip), None)
+                if idx is None:
+                    devices.append((ip, event.get("short"), True,
+                                    True, event.get("port"),
+                                    event.get("identity")))
+                    idx = len(devices) - 1
+                selected.add(idx)
                 return True
             if kind == "scan-failed":
                 status = f"  Pairing failed for {event.get('ip')} — try again"

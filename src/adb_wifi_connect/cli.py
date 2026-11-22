@@ -121,14 +121,22 @@ def _early_scan_target(session, on_connect):
 
 
 def _absorb_scanned(session, devices, selected):
-    """Append a record for every queued scanned event — straight from
-    the payload — and force-check its index, so the connect loop serves
-    it like any other selected phone (flow's already-connected
-    short-circuit gives it a single status line)."""
+    """Serve every queued scanned event — force-check its row so the
+    connect loop serves it like any other selected phone (flow's
+    already-connected short-circuit gives it a single status line).
+    A phone discovery ALREADY listed (same IP) keeps its existing
+    record: the payload is NOT appended, so a listed phone scanning
+    the QR can never appear twice in the batch."""
     for event in _drain_scan_events(session):
-        devices.append((event.get("ip"), event.get("short"), True, True,
-                        event.get("port"), event.get("identity")))
-        selected.append(len(devices) - 1)
+        ip = event.get("ip")
+        idx = next((i for i, rec in enumerate(devices)
+                    if rec and rec[0] == ip), None)
+        if idx is None:
+            devices.append((ip, event.get("short"), True, True,
+                            event.get("port"), event.get("identity")))
+            idx = len(devices) - 1
+        if idx not in selected:
+            selected.append(idx)
 
 
 def _record_paired(rec):

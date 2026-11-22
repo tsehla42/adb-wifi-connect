@@ -228,6 +228,51 @@ def test_single_device_connected_line_named(capsys):
     assert "Connected: OnePlus 15 (CPH2745) · 1.2.3.4:5555" in out, out
 
 
+def test_batch_drain_scan_of_listed_phone_reuses_row(capsys):
+    """A scan of a phone that discovery ALREADY listed (it scanned the
+    QR while connected) selects that existing record instead of
+    appending a duplicate — the batch must count each phone once."""
+    events = queue.Queue()
+    session = MagicMock()
+    session.events = events
+    session.result = None
+    payload = {"kind": "scanned", "ip": "1.2.3.5", "short": "STALE-SHORT",
+               "port": 40001, "target": "1.2.3.5:40001",
+               "identity": {"brand": "samsung", "model": "SM-G9960"}}
+    devices = [
+        ("1.2.3.4", "X1", True, True, 40000, None),
+        ("1.2.3.5", "X2", True, True, 40001, None),
+    ]
+
+    def select_then_scan(devices, is_tty=False, **kwargs):
+        events.put(payload)  # scanned while the selector runs
+        return [0]
+
+    with patch('adb_wifi_connect.cli.start_pairing_session',
+               return_value=session), \
+         patch('adb_wifi_connect.cli.discover_all_phones',
+               return_value=devices), \
+         patch('adb_wifi_connect.cli.enrich_devices',
+               side_effect=lambda recs: recs), \
+         patch('adb_wifi_connect.cli.select_devices',
+               side_effect=select_then_scan), \
+         patch('adb_wifi_connect.cli.connect_single_device',
+               side_effect=lambda ip, **kw: f"{ip}:41234") as mock_connect, \
+         patch('adb_wifi_connect.adb.warm_adb'), \
+         patch('sys.stdin.isatty', return_value=True), \
+         patch('sys.argv', ['awc']):
+        from adb_wifi_connect.cli import main
+        result = main()
+    connected = [c.args[0] for c in mock_connect.call_args_list]
+    assert connected == ["1.2.3.4", "1.2.3.5"], connected
+    assert len(devices) == 2, "listed phone must not be appended twice"
+    reused = mock_connect.call_args_list[1].kwargs
+    assert reused.get("short_name") == "X2", \
+        "connect must reuse the DISCOVERY record, not a payload copy"
+    out = capsys.readouterr().out
+    assert "Connecting 2 devices..." in out, out
+
+
 def test_batch_drain_appends_scanned_phone(capsys):
     """A scan that lands while the selector is open joins the batch: its
     record comes straight from the event payload, is force-checked into

@@ -208,13 +208,14 @@ When multiple devices are found on the network:
    disconnected** (desired-state checkboxes)
 
 **Scan wins:** if a phone scans the QR while this is on screen, that
-phone is appended to the run and pre-checked — the scan acts as confirm,
-no selection needed.
+phone joins the run pre-checked — appended as a new row only when it
+isn't already in the list (an already-listed phone keeps its single
+row, never a duplicate) — the scan acts as confirm, no selection needed.
 
 ```
 === ADB WiFi Connection ===
 
-        (pairing QR — ASCII lines, drawn when the frame fits)
+        (pairing QR — ASCII lines, centered, drawn when the frame fits)
 
 Found 2 devices:
 
